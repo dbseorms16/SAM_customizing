@@ -6,7 +6,7 @@
 
 import cv2  # type: ignore
 
-from segment_anything import SamAutomaticMaskGenerator, sam_model_registry
+from segment_anything import SamAutomaticMaskGenerator, sam_model_registry, SamPredictor
 
 import argparse
 import json
@@ -197,6 +197,7 @@ def main(args: argparse.Namespace) -> None:
     sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
     _ = sam.to(device=args.device)
     output_mode = "coco_rle" if args.convert_to_rle else "binary_mask"
+    # output_mode = "binary_mask" 
     amg_kwargs = get_amg_kwargs(args)
     generator = SamAutomaticMaskGenerator(sam, output_mode=output_mode, **amg_kwargs)
 
@@ -206,8 +207,8 @@ def main(args: argparse.Namespace) -> None:
         targets = [
             f for f in os.listdir(args.input) if not os.path.isdir(os.path.join(args.input, f))
         ]
+        
         targets = [os.path.join(args.input, f) for f in targets]
-
     os.makedirs(args.output, exist_ok=True)
 
     for t in targets:
@@ -224,7 +225,7 @@ def main(args: argparse.Namespace) -> None:
         base = os.path.splitext(base)[0]
         save_base = os.path.join(args.output, base)
         if output_mode == "binary_mask":
-            os.makedirs(save_base, exist_ok=False)
+            os.makedirs(save_base, exist_ok=True)
             write_masks_to_folder(masks, save_base)
         else:
             save_file = save_base + ".json"

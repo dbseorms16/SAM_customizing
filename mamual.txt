@@ -1,0 +1,10 @@
+python scripts/amg.py --checkpoint ./sam_vit_h.pth --model-type vit_h --input C:/Users/dbseo/Desktop/data/Custom_data/test_back --output ./result 
+
+python scripts/predict.py --checkpoint ./sam_vit_h.pth --model-type vit_h --input C:/Users/dbseo/Desktop/codes/test --output ./result 
+
+
+python scripts/predict_with_craft.py --checkpoint ./sam_vit_h.pth --model-type vit_h --input C:/Users/dbseo/Desktop/codes/test/test --output ./result 
+
+pip install pycocotools-windows
+
+pip install opencv-python  matplotlib onnxruntime onnx
