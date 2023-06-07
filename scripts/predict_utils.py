@@ -6,7 +6,7 @@
 
 import cv2  # type: ignore
 import numpy as np
-from segment_anything import SamAutomaticMaskGenerator, sam_model_registry, SamPredictor
+# from segment_anything import SamAutomaticMaskGenerator, sam_model_registry, SamPredictor
 import time
 
 import argparse
@@ -24,6 +24,9 @@ from torch.autograd import Variable
 import craft.craft_utils as craft_utils
 
 def show_mask(mask, ax, GT=False, random_color=False):
+    if type(mask) is torch.Tensor:
+        mask = mask.detach().cpu().numpy()
+        
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
     elif GT:
@@ -101,7 +104,9 @@ def copyStateDict(state_dict):
     return new_state_dict
 
 
-def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, args, refine_net=None):
+
+def Craft_inference(net, predictor, image, args, point_based=True, refine_net=None ):
+
     t0 = time.time()
 
     # resize
@@ -112,7 +117,7 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, a
     x = imgproc.normalizeMeanVariance(img_resized)
     x = torch.from_numpy(x).permute(2, 0, 1)    # [h, w, c] to [c, h, w]
     x = Variable(x.unsqueeze(0))                # [c, h, w] to [b, c, h, w]
-    if cuda:
+    if args.cuda:
         x = x.cuda()
 
     # forward pass
@@ -129,11 +134,11 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, a
             y_refiner = refine_net(y, feature)
         score_link = y_refiner[0,:,:,0].cpu().data.numpy()
 
-    t0 = time.time() - t0
-    t1 = time.time()
+    # t0 = time.time() - t0
+    # t1 = time.time()
 
     # Post-processing
-    boxes, polys = craft_utils.getDetBoxes(score_text, score_link, text_threshold, link_threshold, low_text, poly)
+    boxes, polys = craft_utils.getDetBoxes(score_text, score_link, args.text_threshold, args.link_threshold, args.low_text, args.poly)
 
     # coordinate adjustment
     boxes = craft_utils.adjustResultCoordinates(boxes, ratio_w, ratio_h)
@@ -141,16 +146,43 @@ def test_net(net, image, text_threshold, link_threshold, low_text, cuda, poly, a
     for k in range(len(polys)):
         if polys[k] is None: polys[k] = boxes[k]
 
-    t1 = time.time() - t1
+    # t1 = time.time() - t1
 
     # render results (optional)
-    render_img = score_text.copy()
-    render_img = np.hstack((render_img, score_link))
-    ret_score_text = imgproc.cvt2HeatmapImg(render_img)
+    # render_img = score_text.copy()
+    # render_img = np.hstack((render_img, score_link))
+    # ret_score_text = imgproc.cvt2HeatmapImg(render_img)
 
-    if args.show_time : print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
+    # if args.show_time : print("\ninfer/postproc time : {:.3f}/{:.3f}".format(t0, t1))
+    
+    text = []
+    label = []
+    for i, box in enumerate(polys):
+        poly = np.array(box).astype(np.int32).reshape((-1))
+        poly = poly.reshape(-1, 2).reshape((-1, 1, 2))
+        if point_based:
+            #point
+            text.append([int((poly[2][0][0] + poly[0][0][0]) // 2), int((poly[0][0][1] + poly[2][0][1]) // 2)])
+            label.append(1)
+        else:
+            #box
+            text.append([poly[0][0][0], poly[0][0][1], poly[2][0][0], poly[2][0][1]])
+    
+    if point_based:
+        #point
+        input_point = np.array(text)
+        input_label = np.array(label)
+        transformed_boxes = None
+        input_boxes = None
+    else:
+        #boxes
+        input_point = None
+        input_label = None
+        input_boxes = torch.tensor(text, device=predictor.device)
+        transformed_boxes = predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
+    
 
-    return boxes, polys, ret_score_text
+    return input_point, input_label, transformed_boxes, input_boxes
 
 
 def calculate_metrics(pred, gt):
@@ -436,3 +468,26 @@ def binary_focal_loss(gt, pr, gamma=2.0, alpha=0.25, **kwargs):
     loss_0 = - (1 - gt) * ((1 - alpha) * backend.pow((pr), gamma) * backend.log(1 - pr))
     loss = backend.mean(loss_0 + loss_1)
     return loss
+
+def save_plt(image, path=None):
+    if type(image) is torch.Tensor:
+        image = image.detach().cpu().numpy()
+    save_base = os.path.join('./feature_resluts/')
+    plt.figure(figsize=(10,10))
+    plt.imshow(image, cmap='gray')
+    filename = f"{path}.png"
+    
+    ##mask save
+    # pred_mask = mask.astype(int) 
+    
+    # iou, f_score, precision, recall = calculate_metrics(pred_mask, gt_mask)
+    # np.save(f'./mask/mask1_{i}', mask.astype(int))
+    # show_mask(mask, plt.gca())
+    # show_box(input_box, plt.gca())
+    # show_points(input_point, input_label, plt.gca())
+
+    # plt.title(f"Mask {1}, IOU: {iou:.3f}, F-score: {f_score:.3f}, precision: {precision:.3f}, recall: {recall:.3f}, Confidence: {score:.3f}", fontsize=12)
+    # plt.axis('off')
+    # filename = f"{base}_{r}.png"
+    plt.savefig(os.path.join(save_base, filename), bbox_inches='tight', pad_inches=0)
+    plt.close()

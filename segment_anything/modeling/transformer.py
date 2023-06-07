@@ -11,7 +11,7 @@ import math
 from typing import Tuple, Type
 
 from .common import MLPBlock
-
+from scripts.predict_utils import save_plt
 
 class TwoWayTransformer(nn.Module):
     def __init__(
@@ -153,6 +153,7 @@ class TwoWayAttentionBlock(nn.Module):
         self, queries: Tensor, keys: Tensor, query_pe: Tensor, key_pe: Tensor
     ) -> Tuple[Tensor, Tensor]:
         # Self attention block
+
         if self.skip_first_layer_pe:
             queries = self.self_attn(q=queries, k=queries, v=queries)
         else:
@@ -180,6 +181,7 @@ class TwoWayAttentionBlock(nn.Module):
         attn_out = self.cross_attn_image_to_token(q=k, k=q, v=queries)
         keys = keys + attn_out
         keys = self.norm4(keys)
+        
 
         return queries, keys
 

@@ -14,12 +14,25 @@ import os
 from typing import Any, Dict, List
 import matplotlib.pyplot as plt
 from predict_utils import *
-
 from predict_parser import parser_init
-
 import sys
+
+Craft_On = True
+
+if Craft_On:
+    from predict_parser import parser_init, parser_craft
+    from craft.craft import CRAFT
+    import torch
+
+
 np.set_printoptions(threshold=sys.maxsize)
-def main(args: argparse.Namespace) -> None:
+def main(args: argparse.Namespace, c_args) -> None:
+    if Craft_On:
+        print("Loading Craft")
+        net = CRAFT()     # initialize
+        net.load_state_dict(copyStateDict(torch.load('./craft_mlt_25k.pth')))
+        net = net.cuda()
+    
     print("Loading model...")
     sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
     _ = sam.to(device=args.device)
@@ -38,30 +51,44 @@ def main(args: argparse.Namespace) -> None:
         
         targets = [os.path.join(args.input, f) for f in targets]
     os.makedirs(args.output, exist_ok=True)
+    
+    
+    
     ## 한 이미지에 여러 visual을 부여할때 결과
     dict = {
         '1' : {
-            # 'input_point': np.array([[352, 139]]),
-            # 'input_point': np.array([[354, 392]]),
-            # 'label' : np.array([1]),
-            
             # 가운데
             'input_point': np.array([[352, 139], [354, 392]]),
             'label' : np.array([1, 1]),
-            # 4개 꼭지점
-            
-            # 'input_point': np.array([[45, 99], [44,187], [651,103], [655,189],
-            #                          [116,354], [637, 353], [115,430], [638, 427]
-            #                          ]),
-            # 'label' : np.array([1, 1, 1, 1, 1, 1, 1, 1]),
-
-            # 4개 꼭지점 + 가운데
-            # 'input_point': np.array([[45, 99], [44,187], [651,103], [655,189],
-            #              [116,354], [637, 353], [115,430], [638, 427],      [352, 139], [354, 392]
-            #              ]),
-            # 'label' : np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
-            'input_box' : None
+            'input_box' : None,
+            'craft' : False
             },
+        '2' : {
+            # 4개 꼭지점
+            'input_point': np.array([[45, 99], [44,187], [651,103], [655,189],
+                                     [116,354], [637, 353], [115,430], [638, 427]
+                                     ]),
+            'label' : np.array([1, 1, 1, 1, 1, 1, 1, 1]),
+            'input_box' : None,
+            'craft' : False
+            },
+        '3' : {
+            # 4개 꼭지점 + 가운데
+            'input_point': np.array([[45, 99], [44,187], [651,103], [655,189],
+                         [116,354], [637, 353], [115,430], [638, 427],     
+                         [352, 139], [354, 392]
+                         ]),
+            'label' : np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]),
+            'input_box' : None,
+            'craft' : False
+            },
+        '4' : {
+            'craft' : True,
+            'point_based' : True},
+        '5' : {
+            'craft' : True,
+            ##box_based
+            'point_based' : False}
         }
     
     # dict = {
@@ -134,7 +161,7 @@ def main(args: argparse.Namespace) -> None:
             
     #         'input_box' : None
     #         }
-    }
+    # }
     for t in targets:
         print(f"Processing '{t}'...")
         image = cv2.imread(t)
@@ -151,17 +178,31 @@ def main(args: argparse.Namespace) -> None:
         predictor.set_image(image)
 
         # masks = generator.generate(image)
-        input_point = inputs['input_point']
-        input_label = inputs['label']
-        input_box = inputs['input_box']
-        masks, scores, logits = predictor.predict(
-            point_coords=input_point,
-            point_labels=input_label,
-            box = None if input_box is None else input_box[None, :],
-            
-            multimask_output=True,
-        )
+         # box_based = True
+        if inputs['craft']:
+            point_based =  inputs['point_based']
+            input_point, input_label, transformed_boxes, input_box = Craft_inference(net, predictor, image, c_args, point_based)
+            box_based = True if point_based is False else False
+        else:            
+            input_point = inputs['input_point']
+            input_label = inputs['label']
+            input_box = inputs['input_box']
+            box_based = False
         
+        if box_based:
+            masks, scores, logits = predictor.predict_torch(
+                point_coords=None,
+                point_labels=None,
+                boxes = transformed_boxes,
+                multimask_output=False)
+        else:
+            # point promt
+            masks, scores, logits = predictor.predict(
+                point_coords=input_point,
+                point_labels=input_label,
+                box = None if input_box is None else input_box[None, :],
+                multimask_output=True)
+            
         base = os.path.basename(t)
         base = os.path.splitext(base)[0]
         save_base = os.path.join(args.output)
@@ -169,23 +210,44 @@ def main(args: argparse.Namespace) -> None:
         # gt_mask = np.load(f'./gt/gt_{filename}.npy')
         ## please fix here!
         gt_mask = np.load(f'./gt/gt_1.npy')
-        for i, (mask, score) in enumerate(zip(masks, scores)):
+        if box_based:
             plt.figure(figsize=(10,10))
             plt.imshow(image)
-            ##mask save
-            pred_mask = mask.astype(int)
-
+            pred_mask = masks.detach().cpu().numpy().astype(int)
             iou, f_score, precision, recall = calculate_metrics(pred_mask, gt_mask)
-            # np.save(f'./mask/mask1_{i}', mask.astype(int))
+            
+            for mask in masks:
+                show_mask(mask.cpu().numpy(), plt.gca(), random_color=True)
+            for box in input_box:
+                show_box(box.cpu().numpy(), plt.gca())
+                
+            # score = score.detach().cpu().numpy()[0]
 
-            show_mask(mask, plt.gca())
-            # show_box(input_box, plt.gca())
-            show_points(input_point, input_label, plt.gca())
             plt.title(f"Mask {i+1}, IOU: {iou:.3f}, F-score: {f_score:.3f}, precision: {precision:.3f}, recall: {recall:.3f}, Confidence: {score:.3f}", fontsize=12)
             plt.axis('off')
             filename = f"{base}_{i}.png"
             plt.savefig(os.path.join(save_base, filename), bbox_inches='tight', pad_inches=0)
             plt.close()
+        
+        else:            
+            for i, (mask, score) in enumerate(zip(masks, scores)):
+                plt.figure(figsize=(10,10))
+                plt.imshow(image)
+                ##mask save
+                pred_mask = mask.astype(int) 
+                
+                iou, f_score, precision, recall = calculate_metrics(pred_mask, gt_mask)
+                # np.save(f'./mask/mask1_{i}', mask.astype(int))
+                show_mask(mask, plt.gca())
+                # show_box(input_box, plt.gca())
+                show_points(input_point, input_label, plt.gca())
+                
+
+                plt.title(f"Mask {i+1}, IOU: {iou:.3f}, F-score: {f_score:.3f}, precision: {precision:.3f}, recall: {recall:.3f}, Confidence: {score:.3f}", fontsize=12)
+                plt.axis('off')
+                filename = f"{base}_{i}.png"
+                plt.savefig(os.path.join(save_base, filename), bbox_inches='tight', pad_inches=0)
+                plt.close()
 
         plt.figure(figsize=(10,10))
         plt.imshow(image)
@@ -204,4 +266,6 @@ def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     args = parser_init()
-    main(args)
+    c_args = parser_craft()
+    
+    main(args, c_args)

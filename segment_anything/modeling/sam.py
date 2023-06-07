@@ -14,6 +14,8 @@ from .image_encoder import ImageEncoderViT
 from .mask_decoder import MaskDecoder
 from .prompt_encoder import PromptEncoder
 
+from scripts.predict_utils import save_plt
+
 
 class Sam(nn.Module):
     mask_threshold: float = 0.0
@@ -150,7 +152,7 @@ class Sam(nn.Module):
         Returns:
           (torch.Tensor): Batched masks in BxCxHxW format, where (H, W)
             is given by original_size.
-        """
+        """         
         masks = F.interpolate(
             masks,
             (self.image_encoder.img_size, self.image_encoder.img_size),
@@ -158,7 +160,7 @@ class Sam(nn.Module):
             align_corners=False,
         )
         masks = masks[..., : input_size[0], : input_size[1]]
-        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
+        masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False) 
         return masks
 
     def preprocess(self, x: torch.Tensor) -> torch.Tensor:

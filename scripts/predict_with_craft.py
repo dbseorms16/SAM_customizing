@@ -19,7 +19,7 @@ from predict_parser import parser_init, parser_craft
 from craft.craft import CRAFT
 import torch
 
-def main(args: argparse.Namespace) -> None:
+def main(args: argparse.Namespace, c_args) -> None:
     print("Loading Craft")
     net = CRAFT()     # initialize
     net.load_state_dict(copyStateDict(torch.load('./craft_mlt_25k.pth')))
@@ -58,10 +58,10 @@ def main(args: argparse.Namespace) -> None:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 
-        # box_based = True
-        box_based = False
+        box_based = True
+        # box_based = False
 
-        bboxes, polys, score_text = test_net(net, image, args.text_threshold, args.link_threshold, args.low_text, args.cuda, args.poly, args, refine_net=None)
+        bboxes, polys, score_text =  Craft_inference(net, predictor, image, c_args, point_based)
 
         text = []
         label = []
@@ -141,5 +141,7 @@ def main(args: argparse.Namespace) -> None:
 
 
 if __name__ == "__main__":
-    args = parser_craft()
-    main(args)
+    args = parser_init()
+    c_args = parser_craft()
+    
+    main(args, c_args)
